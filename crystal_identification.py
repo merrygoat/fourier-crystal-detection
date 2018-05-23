@@ -51,17 +51,16 @@ def remove_central_peak(image, maxima):
     :return: ndarray of coordinates corresponding to peaks in the image with the central peak removed
     """
 
-    central_x_pixel = np.round(np.shape(image)[0] / 2.)
-    central_y_pixel = np.round(np.shape(image)[1] / 2.)
-    middle_mask = np.where((maxima == (central_x_pixel, central_y_pixel)).all(axis=1))
+    central_coordinate = get_center_of_image(image)
+    middle_mask = np.where((maxima == central_coordinate).all(axis=1))
     maxima = np.delete(maxima, middle_mask, axis=0)
 
     return maxima
 
 
-def ringintensity(image, maxima):
+def get_ring_intensity(image, maxima):
     """
-    # Calculates the relative intensity of the discovered peaks to the sampled intensity at
+    # Calculates the relative intensity of the discovered peaks and the sampled intensity at
     the same distance from the centre of the fourier transform.
     Gives us a way of checking for "liquidity"
     :param image:
@@ -69,16 +68,17 @@ def ringintensity(image, maxima):
     :return:
     """
     num_ring_samples = 100
-    middlepixel = int(np.round(np.shape(image)[0] / 2.))
-    # average peak height
-    peakheight = np.average(image[(maxima[:, 0], maxima[:, 1])])
+
+    average_peak_intensity = np.average(image[(maxima[:, 0], maxima[:, 1])])
+
+    center_coordinate = get_center_of_image(image)
+
     # average distance between center and peaks, this will be our ring radius
-    r = np.average(
-        ((((maxima - middlepixel)[:, 0]) ** 2) + (((maxima - middlepixel)[:, 1]) ** 2)) ** 0.5)
+    average_distance = np.average(np.sum((maxima - center_coordinate) ** 2, axis=1) ** 0.5)
     # generate our random angles along the ring for sampling
     theta = np.random.random(num_ring_samples) * np.pi * 2
-    x = r * np.cos(theta)
-    y = r * np.sin(theta)
+    x = average_distance * np.cos(theta)
+    y = average_distance * np.sin(theta)
     x = np.round(x).astype(int)
     y = np.round(y).astype(int)
     # create an array with the sampling positions
@@ -86,8 +86,14 @@ def ringintensity(image, maxima):
                                           axis=1) + middlepixel
     # take the intensity samples
     intensities = image[(positions_in_fourier[:, 0], positions_in_fourier[:, 1])]
-    intensityratio = np.average(intensities) / peakheight
+    intensityratio = np.average(intensities) / average_peak_intensity
     return intensityratio
+
+
+def get_center_of_image(image):
+    image_shape = np.shape(image)
+    center_coordinate = [int(np.round(dimension) / 2.) for dimension in image_shape]
+    return center_coordinate
 
 
 def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor):
@@ -109,36 +115,42 @@ def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, ras
             maxima = find_maxima_in_image(cropped_ft_of_subsection, threshold, minimum_peak_separation_distance)
 
             subsection_index = [int(lowestx / rastering_interval), int(lowesty / rastering_interval)]
-            # if we've found some peaks
-            classify_image_region(cropped_ft_of_subsection, maxima, results_array, ring_threshold, subsection_index)
+            crystal_type = classify_image_region(cropped_ft_of_subsection, maxima, ring_threshold)
+            results_array[subsection_index[0], subsection_index[1]] = crystal_type
 
     return results_array
 
 
-def classify_image_region(cropped_ft_of_subsection, maxima, results_array, ring_threshold, subsection_index):
-
-
+def classify_image_region(image, maxima, ring_threshold):
+    """
+    Classify the subsection of the image depending on the number of maxima there are
+    :param image: An ndarray representing an image
+    :param maxima: ndarray of coordinates corresponding to peaks in the image
+    :param ring_threshold: A peak intesnity threshold above which a crystal is identified
+    """
     number_of_maxima = maxima.shape[0]
-    if number_of_maxima > 0:
-        # calculate whether we have a ring
-        ring_intensity = ringintensity(cropped_ft_of_subsection, maxima)
+    if number_of_maxima == 0:
+        # No maxima so just a liquid
+        return 0
+    else:
+        ring_intensity = get_ring_intensity(image, maxima)
         if number_of_maxima == 6:
-            # clear hexagonal crystal
             if ring_intensity < ring_threshold:
-                results_array[subsection_index[0], subsection_index[1]] = 6
+                # clear hexagonal crystal
+                return 6
             else:
                 # potential boundary between hex+liquid
-                results_array[subsection_index[0], subsection_index[1]] = 1
+                return 1
         elif number_of_maxima == 4:
-            if ring_intensity < ring_threshold:  # clear cross crystal
-                results_array[subsection_index[0], subsection_index[1]] = 4
+            if ring_intensity < ring_threshold:
+                # clear cross crystal
+                return 4
             else:
                 # potential boundary between cross+liquid
-                results_array[subsection_index[0], subsection_index[1]] = 0.5
+                return 0.5
         else:
-            results_array[subsection_index[0], subsection_index[1]] = 0
-    else:
-        results_array[subsection_index[0], subsection_index[1]] = 0
+            # Just liquid
+            return 0
 
 
 def plot_result(array):
