@@ -107,31 +107,38 @@ def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, ras
             cropped_ft_of_subsection = crop_image(ft_of_subsection, image_crop_factor)
             minimum_peak_separation_distance = int(ft_of_subsection.shape[0] / 20.)
             maxima = find_maxima_in_image(cropped_ft_of_subsection, threshold, minimum_peak_separation_distance)
-            number_of_maxima = maxima.shape[0]
+
             subsection_index = [int(lowestx / rastering_interval), int(lowesty / rastering_interval)]
             # if we've found some peaks
-            if number_of_maxima > 0:
-                # calculate whether we have a ring
-                ring_intensity = ringintensity(cropped_ft_of_subsection, maxima)
-                if number_of_maxima == 6:
-                    # clear hexagonal crystal
-                    if ring_intensity < ring_threshold:
-                        results_array[subsection_index[0], subsection_index[1]] = 6
-                    else:
-                        # potential boundary between hex+liquid
-                        results_array[subsection_index[0], subsection_index[1]] = 1
-                elif number_of_maxima == 4:
-                    if ring_intensity < ring_threshold:  # clear cross crystal
-                        results_array[subsection_index[0], subsection_index[1]] = 4
-                    else:
-                        # potential boundary between cross+liquid
-                        results_array[subsection_index[0], subsection_index[1]] = 0.5
-                else:
-                    results_array[subsection_index[0], subsection_index[1]] = 0
-            else:
-                results_array[subsection_index[0], subsection_index[1]] = 0
+            classify_image_region(cropped_ft_of_subsection, maxima, results_array, ring_threshold, subsection_index)
 
     return results_array
+
+
+def classify_image_region(cropped_ft_of_subsection, maxima, results_array, ring_threshold, subsection_index):
+
+
+    number_of_maxima = maxima.shape[0]
+    if number_of_maxima > 0:
+        # calculate whether we have a ring
+        ring_intensity = ringintensity(cropped_ft_of_subsection, maxima)
+        if number_of_maxima == 6:
+            # clear hexagonal crystal
+            if ring_intensity < ring_threshold:
+                results_array[subsection_index[0], subsection_index[1]] = 6
+            else:
+                # potential boundary between hex+liquid
+                results_array[subsection_index[0], subsection_index[1]] = 1
+        elif number_of_maxima == 4:
+            if ring_intensity < ring_threshold:  # clear cross crystal
+                results_array[subsection_index[0], subsection_index[1]] = 4
+            else:
+                # potential boundary between cross+liquid
+                results_array[subsection_index[0], subsection_index[1]] = 0.5
+        else:
+            results_array[subsection_index[0], subsection_index[1]] = 0
+    else:
+        results_array[subsection_index[0], subsection_index[1]] = 0
 
 
 def plot_result(array):
@@ -154,7 +161,7 @@ def load_image(filename):
 def main():
 
     filename = 'sample_image.tif'
-    rastering_interval = 4
+    rastering_interval = 1
     ring_threshold = 0.9
     size_of_scan_box = 128
     threshold = 0.5
