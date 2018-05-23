@@ -5,14 +5,22 @@ import matplotlib
 from skimage.feature import peak_local_max
 
 
-def get_fourier_transform_of_slice(region):
-    # returns the fourier transform of a region
-    fourier = np.log10(np.fft.fftshift(abs(np.fft.fft2(region))))
-    return fourier
+def get_fourier_transform_of_slice(image):
+    """
+    Returns the real valued Fourier transform of an image
+    :param image: the image to apply the Fourier transform to
+    :return: The Fourier transofrm of the image
+    """
+    return np.fft.fftshift(abs(np.fft.fft2(image)))
 
 
 def crop_image(image, cut_size):
-    # crops an array
+    """
+    Returns a subsection of an array representing an image
+    :param image: The image as a numpy array
+    :param cut_size: The fraction to cut from each side of the image
+    :return: The cropped image as a numpy array
+    """
     cut_high = (1 - cut_size)
     x_min = int(image.shape[0] * cut_size)
     x_max = int(image.shape[0] * cut_high)
@@ -58,7 +66,7 @@ def ringintensity(fourier_cut, maxima, number_ring_samples):
     return intensityratio
 
 
-def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold):
+def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, rastering_interval):
     # scans a box along the original image, and uses the foruier transform in that box to assign a number to whether it's a crystal or a liquid
 
     rastering_interval = 4  # Rastering size
@@ -75,6 +83,7 @@ def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold):
             # take the relevant slice
             image_subsection = original_image[lowestx:lowestx + size_of_scan_box, lowesty:lowesty + size_of_scan_box]
             ft_of_subsection = get_fourier_transform_of_slice(image_subsection)
+            ft_of_subsection = np.log10(ft_of_subsection)
             cropped_ft_of_subsection = crop_image(ft_of_subsection, fourier_cut_low)
 
             min_distance = int(ft_of_subsection.shape[0] / 20.)
@@ -119,11 +128,21 @@ def plot_result(array):
     plt.savefig("crystal_measure.png")
 
 
-def main():
-    filename = 'sample_image.tif'
-    im = pl.imread(filename)[:, :, 0]
+def load_image(filename):
+    image = pl.imread(filename)[:, :, 0]
+    return image
 
-    array = scanfourier(im, 0.5, 128, 0.9)
+
+def main():
+
+    filename = 'sample_image.tif'
+    rastering_interval = 4
+    ring_threshold = 0.9
+    size_of_scan_box = 128
+    threshold = 0.5
+
+    image = load_image(filename)
+    array = scanfourier(image, threshold, size_of_scan_box, ring_threshold, rastering_interval)
 
     plot_result(array)
 
