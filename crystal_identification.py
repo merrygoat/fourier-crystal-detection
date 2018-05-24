@@ -45,55 +45,56 @@ def find_maxima_in_image(image, minimum_intensity_threshold, minimum_peak_separa
 
 def remove_central_peak(image, maxima):
     """
-    The Fourier transform always has a peak in the middle. We are not interested in this peak so remove it.
+    The Fourier transform always has a peak in the middle.
+    We are not interested in this peak so remove it from the list of maxima.
     :param image: ndarray of the real valued Fourier transform of an image
     :param maxima: ndarray of coordinates corresponding to peaks in the image
-    :return: ndarray of coordinates corresponding to peaks in the image with the central peak removed
+    :return: ndarray corresponding to coordinates of peaks in the image
     """
-
     central_coordinate = get_center_of_image(image)
-    middle_mask = np.where((maxima == central_coordinate).all(axis=1))
-    maxima = np.delete(maxima, middle_mask, axis=0)
-
-    return maxima
+    revised_maxima = [peak for peak in list(maxima) if np.all(peak != central_coordinate)]
+    return np.array(revised_maxima)
 
 
-def get_ring_intensity(image, maxima):
+def get_ring_intensity(image, maxima, pixel_distances, center_coordinate):
     """
-    # Calculates the relative intensity of the discovered peaks and the sampled intensity at
+    Calculates the relative intensity of the discovered peaks and the sampled intensity at
     the same distance from the centre of the fourier transform.
     Gives us a way of checking for "liquidity"
-    :param image:
-    :param maxima:
-    :return:
+    :param image: An ndarray represnting an image
+    :param maxima: a list of tuples representing coordinates of maxima
+    :param pixel_distances: An array giving the distance of each pixel from the center of the image
+    :return: The ratio between the intenisty of the peaks and the radial average of the intensity at the same
+    distance from the center as the peaks
     """
-    num_ring_samples = 100
-
     average_peak_intensity = np.average(image[(maxima[:, 0], maxima[:, 1])])
 
-    center_coordinate = get_center_of_image(image)
-
     # average distance between center and peaks, this will be our ring radius
-    average_distance = np.average(np.sum((maxima - center_coordinate) ** 2, axis=1) ** 0.5)
-    # generate our random angles along the ring for sampling
-    theta = np.random.random(num_ring_samples) * np.pi * 2
-    x = average_distance * np.cos(theta)
-    y = average_distance * np.sin(theta)
-    x = np.round(x).astype(int)
-    y = np.round(y).astype(int)
-    # create an array with the sampling positions
-    positions_in_fourier = np.concatenate((np.split(x, x.shape[0]), np.split(y, y.shape[0])),
-                                          axis=1) + middlepixel
-    # take the intensity samples
-    intensities = image[(positions_in_fourier[:, 0], positions_in_fourier[:, 1])]
-    intensityratio = np.average(intensities) / average_peak_intensity
+    average_distance = np.average(np.linalg.norm((maxima - center_coordinate), axis=1))
+
+    mask = np.logical_and(pixel_distances > average_distance - 0.5, pixel_distances < average_distance + 0.5)
+    ring_intensity = np.average(image[mask])
+
+    intensityratio = np.average(ring_intensity) / average_peak_intensity
     return intensityratio
 
 
 def get_center_of_image(image):
-    image_shape = np.shape(image)
-    center_coordinate = [int(np.round(dimension) / 2.) for dimension in image_shape]
+    """
+    Return the coordinates representing the center of an image
+    :param image: An ndarray representing an image
+    :return: A tuple representing the coordinates of the center of image
+    """
+    image_shape = np.array(np.shape(image))
+    center_coordinate = np.rint(image_shape / 2.0)
     return center_coordinate
+
+
+def setup_radial_average(image, cropped_center):
+    binsize = 1
+    y, x = np.indices(image.shape)
+    r = np.hypot(x - cropped_center[0], y - cropped_center[1]) / binsize
+    return r
 
 
 def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor):
@@ -101,27 +102,31 @@ def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, ras
 
     num_x_rasters = int((original_image.shape[0] - size_of_scan_box) / rastering_interval)
     num_y_rasters = int((original_image.shape[1] - size_of_scan_box) / rastering_interval)
-    results_array = np.empty((num_x_rasters, num_y_rasters))
+    results_array = np.zeros((num_x_rasters, num_y_rasters))
 
-    for lowestx in np.arange(0, original_image.shape[0] - size_of_scan_box, rastering_interval):
-        # scanning over input image
-        for lowesty in np.arange(0, original_image.shape[1] - size_of_scan_box, rastering_interval):
-
-            image_subsection = original_image[lowestx:lowestx + size_of_scan_box, lowesty:lowesty + size_of_scan_box]
+    for x_bin in range(num_x_rasters):
+        for y_bin in range(num_y_rasters):
+            subsection_minima = np.array((x_bin * rastering_interval, y_bin * rastering_interval))
+            subsection_maxima = subsection_minima + size_of_scan_box
+            image_subsection = original_image[subsection_minima[0]:subsection_maxima[0],
+                                              subsection_minima[1]:subsection_maxima[1]]
             ft_of_subsection = get_fourier_transform_of_slice(image_subsection)
-            ft_of_subsection = np.log10(ft_of_subsection)
             cropped_ft_of_subsection = crop_image(ft_of_subsection, image_crop_factor)
-            minimum_peak_separation_distance = int(ft_of_subsection.shape[0] / 20.)
+            with np.errstate(divide='ignore'):
+                cropped_ft_of_subsection = np.log10(cropped_ft_of_subsection)
+            if x_bin == 0 and y_bin == 0:
+                cropped_center = get_center_of_image(cropped_ft_of_subsection)
+                minimum_peak_separation_distance = int(ft_of_subsection.shape[0] / 20.)
+                pixel_distances = setup_radial_average(cropped_ft_of_subsection, cropped_center)
             maxima = find_maxima_in_image(cropped_ft_of_subsection, threshold, minimum_peak_separation_distance)
 
-            subsection_index = [int(lowestx / rastering_interval), int(lowesty / rastering_interval)]
-            crystal_type = classify_image_region(cropped_ft_of_subsection, maxima, ring_threshold)
-            results_array[subsection_index[0], subsection_index[1]] = crystal_type
+            crystal_type = classify_image_region(cropped_ft_of_subsection, maxima, ring_threshold, pixel_distances, cropped_center)
+            results_array[x_bin, y_bin] = crystal_type
 
     return results_array
 
 
-def classify_image_region(image, maxima, ring_threshold):
+def classify_image_region(image, maxima, ring_threshold, r, cropped_center):
     """
     Classify the subsection of the image depending on the number of maxima there are
     :param image: An ndarray representing an image
@@ -133,8 +138,9 @@ def classify_image_region(image, maxima, ring_threshold):
         # No maxima so just a liquid
         return 0
     else:
-        ring_intensity = get_ring_intensity(image, maxima)
+
         if number_of_maxima == 6:
+            ring_intensity = get_ring_intensity(image, maxima, r, cropped_center)
             if ring_intensity < ring_threshold:
                 # clear hexagonal crystal
                 return 6
@@ -142,6 +148,7 @@ def classify_image_region(image, maxima, ring_threshold):
                 # potential boundary between hex+liquid
                 return 1
         elif number_of_maxima == 4:
+            ring_intensity = get_ring_intensity(image, maxima, r, cropped_center)
             if ring_intensity < ring_threshold:
                 # clear cross crystal
                 return 4
@@ -149,7 +156,7 @@ def classify_image_region(image, maxima, ring_threshold):
                 # potential boundary between cross+liquid
                 return 0.5
         else:
-            # Just liquid
+            # No maxima so just a liquid
             return 0
 
 
@@ -173,7 +180,7 @@ def load_image(filename):
 def main():
 
     filename = 'sample_image.tif'
-    rastering_interval = 1
+    rastering_interval = 2
     ring_threshold = 0.9
     size_of_scan_box = 128
     threshold = 0.5
