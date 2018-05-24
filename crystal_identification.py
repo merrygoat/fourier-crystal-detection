@@ -11,7 +11,13 @@ def get_fourier_transform_of_slice(image):
     :param image: the image to apply the Fourier transform to
     :return: The Fourier transofrm of the image
     """
-    return np.fft.fftshift(abs(np.fft.fft2(image)))
+    fft = np.fft.fft2(image)
+    power_spectrum = get_2d_power_spectrum(fft)
+    return np.fft.fftshift(power_spectrum)
+
+
+def get_2d_power_spectrum(image):
+    return image.real ** 2 + image.imag ** 2
 
 
 def crop_image(image, cut_size):
@@ -100,6 +106,8 @@ def setup_radial_average(image, cropped_center):
 def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor):
     # scans a box along the original image, and uses the foruier transform in that box to assign a number to whether it's a crystal or a liquid
 
+    minimum_peak_separation_distance = pixel_distances = cropped_center = 0
+
     num_x_rasters = int((original_image.shape[0] - size_of_scan_box) / rastering_interval)
     num_y_rasters = int((original_image.shape[1] - size_of_scan_box) / rastering_interval)
     results_array = np.zeros((num_x_rasters, num_y_rasters))
@@ -180,7 +188,7 @@ def load_image(filename):
 def main():
 
     filename = 'sample_image.tif'
-    rastering_interval = 2
+    rastering_interval = 1
     ring_threshold = 0.9
     size_of_scan_box = 128
     threshold = 0.5
