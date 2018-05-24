@@ -1,4 +1,3 @@
-import pylab as pl
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -9,7 +8,7 @@ def get_fourier_transform_of_slice(image):
     """
     Returns the real valued Fourier transform of an image
     :param image: the image to apply the Fourier transform to
-    :return: The Fourier transofrm of the image
+    :return: The Fourier transform of the image
     """
     fft = np.fft.fft2(image)
     power_spectrum = get_2d_power_spectrum(fft)
@@ -17,6 +16,11 @@ def get_fourier_transform_of_slice(image):
 
 
 def get_2d_power_spectrum(image):
+    """
+    Return the power specrum of a fourier tranform
+    :param image: The real and complex fourier transform
+    :return: The power spectrum of the Fourier transform
+    """
     return image.real ** 2 + image.imag ** 2
 
 
@@ -41,6 +45,7 @@ def find_maxima_in_image(image, minimum_intensity_threshold, minimum_peak_separa
     Finds peaks within an image
     :param image: The original image
     :param minimum_intensity_threshold: The minimum value of a peak relative to the maximum intensity of the image
+    :param minimum_peak_separation_distance: The minimum seperation of detected peaks
     :return: ndarray of coordinates corresponding to peaks in the image
     """
     maxima = peak_local_max(image, min_distance=minimum_peak_separation_distance, threshold_rel=minimum_intensity_threshold)
@@ -57,7 +62,7 @@ def remove_central_peak(image, maxima):
     :param maxima: ndarray of coordinates corresponding to peaks in the image
     :return: ndarray corresponding to coordinates of peaks in the image
     """
-    central_coordinate = get_center_of_image(image)
+    central_coordinate = get_center_of_image(image.shape)
     revised_maxima = [peak for peak in list(maxima) if np.all(peak != central_coordinate)]
     return np.array(revised_maxima)
 
@@ -70,6 +75,7 @@ def get_ring_intensity(image, maxima, pixel_distances, center_coordinate):
     :param image: An ndarray represnting an image
     :param maxima: a list of tuples representing coordinates of maxima
     :param pixel_distances: An array giving the distance of each pixel from the center of the image
+    :param center_coordinate: The coordinate of the center of image
     :return: The ratio between the intenisty of the peaks and the radial average of the intensity at the same
     distance from the center as the peaks
     """
@@ -85,28 +91,29 @@ def get_ring_intensity(image, maxima, pixel_distances, center_coordinate):
     return intensityratio
 
 
-def get_center_of_image(image):
+def get_center_of_image(image_shape):
     """
     Return the coordinates representing the center of an image
-    :param image: An ndarray representing an image
+    :param image_shape: An tuple representing the size of an image
     :return: A tuple representing the coordinates of the center of image
     """
-    image_shape = np.array(np.shape(image))
-    center_coordinate = np.rint(image_shape / 2.0)
+    center_coordinate = np.rint(np.array(image_shape) / 2.0)
     return center_coordinate
 
 
-def setup_radial_average(image, cropped_center):
-    binsize = 1
-    y, x = np.indices(image.shape)
-    r = np.hypot(x - cropped_center[0], y - cropped_center[1]) / binsize
-    return r
+def scanfourier(original_image, minimum_intensity_threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor):
+    """
+    The main loop. Raster over an image and determine whether the subsections are crystalline.
+    :param original_image: The original image to process
+    :param minimum_intensity_threshold: The minimum intensity of a peak in fourier transform
+    :param size_of_scan_box: The size of the region which is Fourier transformed
+    :param ring_threshold: The threshold defining the boundary between crystal and liquid regions
+    :param rastering_interval: The interval in pixels over which to raster the Fourier transform
+    :param image_crop_factor: A float giving the proportion of the image to cut off each side
+    :return:
+    """
 
-
-def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor):
-    # scans a box along the original image, and uses the foruier transform in that box to assign a number to whether it's a crystal or a liquid
-
-    minimum_peak_separation_distance = pixel_distances = cropped_center = 0
+    cropped_center, minimum_peak_separation_distance, pixel_distances = setup_fourier_scan(image_crop_factor, size_of_scan_box)
 
     num_x_rasters = int((original_image.shape[0] - size_of_scan_box) / rastering_interval)
     num_y_rasters = int((original_image.shape[1] - size_of_scan_box) / rastering_interval)
@@ -114,32 +121,66 @@ def scanfourier(original_image, threshold, size_of_scan_box, ring_threshold, ras
 
     for x_bin in range(num_x_rasters):
         for y_bin in range(num_y_rasters):
-            subsection_minima = np.array((x_bin * rastering_interval, y_bin * rastering_interval))
-            subsection_maxima = subsection_minima + size_of_scan_box
-            image_subsection = original_image[subsection_minima[0]:subsection_maxima[0],
-                                              subsection_minima[1]:subsection_maxima[1]]
-            ft_of_subsection = get_fourier_transform_of_slice(image_subsection)
-            cropped_ft_of_subsection = crop_image(ft_of_subsection, image_crop_factor)
+            ft_of_subimage = get_ft_of_subimage(image_crop_factor, original_image, rastering_interval, size_of_scan_box, x_bin, y_bin)
             with np.errstate(divide='ignore'):
-                cropped_ft_of_subsection = np.log10(cropped_ft_of_subsection)
-            if x_bin == 0 and y_bin == 0:
-                cropped_center = get_center_of_image(cropped_ft_of_subsection)
-                minimum_peak_separation_distance = int(ft_of_subsection.shape[0] / 20.)
-                pixel_distances = setup_radial_average(cropped_ft_of_subsection, cropped_center)
-            maxima = find_maxima_in_image(cropped_ft_of_subsection, threshold, minimum_peak_separation_distance)
+                ft_of_subimage = np.log10(ft_of_subimage)
 
-            crystal_type = classify_image_region(cropped_ft_of_subsection, maxima, ring_threshold, pixel_distances, cropped_center)
+            maxima = find_maxima_in_image(ft_of_subimage, minimum_intensity_threshold, minimum_peak_separation_distance)
+            crystal_type = classify_image_region(ft_of_subimage, maxima, ring_threshold, pixel_distances, cropped_center)
             results_array[x_bin, y_bin] = crystal_type
 
     return results_array
 
 
-def classify_image_region(image, maxima, ring_threshold, r, cropped_center):
+def setup_fourier_scan(image_crop_factor, size_of_scan_box):
+    """
+    Initialise some values to be used in finding and classifying maxima
+    :param image_crop_factor: A float specifying how much to crop off each side of the fourier transformed image
+    subsection prior to identifying peaks
+    :param size_of_scan_box: The size of the subimage which is Fourier transformed
+    :return: cropped_center - The coordinates of the center of the cropped box
+    :return: minimum_peak_separation_distance - The minimum separation in pixels of identified peaks in the fourier transform
+    :return: pixel_distances - An array giving the distance of each pixel from the center of the image
+    """
+    minimum_peak_separation_distance = int(size_of_scan_box / 20.)
+    cropped_image_size = int(size_of_scan_box * (1 - 2 * image_crop_factor))
+    cropped_center = get_center_of_image([cropped_image_size, cropped_image_size])
+
+    binsize = 1
+    y, x = np.indices([cropped_image_size, cropped_image_size])
+    pixel_distances = np.hypot(x - cropped_center[0], y - cropped_center[1]) / binsize
+
+    return cropped_center, minimum_peak_separation_distance, pixel_distances
+
+
+def get_ft_of_subimage(image_crop_factor, original_image, rastering_interval, size_of_scan_box, x_bin, y_bin):
+    """
+    Get a subsection of an image, get the Fourier transform then crop the image
+    :param image_crop_factor: A float giving the proportion of the image to cut off each side
+    :param original_image: An ndarray representing the original image
+    :param rastering_interval: The interval in pixels between rastered images
+    :param size_of_scan_box: The size of the sub-image used for the Fourier transform
+    :param x_bin: The bin number of the current sub-image
+    :param y_bin: The bin number of the current sub-image
+    :return: The cropped Fourier transform of the image subection
+    """
+    subimage_minima = np.array((x_bin * rastering_interval, y_bin * rastering_interval))
+    subimgae_maxima = subimage_minima + size_of_scan_box
+    subimage = original_image[subimage_minima[0]:subimgae_maxima[0], subimage_minima[1]:subimgae_maxima[1]]
+    ft_of_subimage = get_fourier_transform_of_slice(subimage)
+    cropped_ft_of_subimage = crop_image(ft_of_subimage, image_crop_factor)
+
+    return cropped_ft_of_subimage
+
+
+def classify_image_region(image, maxima, ring_threshold, pixel_distances, cropped_center):
     """
     Classify the subsection of the image depending on the number of maxima there are
     :param image: An ndarray representing an image
     :param maxima: ndarray of coordinates corresponding to peaks in the image
     :param ring_threshold: A peak intesnity threshold above which a crystal is identified
+    :param pixel_distances: An array giving the distance of each pixel from the center of the image
+    :param cropped_center: The coordinate of the center of image
     """
     number_of_maxima = maxima.shape[0]
     if number_of_maxima == 0:
@@ -148,7 +189,7 @@ def classify_image_region(image, maxima, ring_threshold, r, cropped_center):
     else:
 
         if number_of_maxima == 6:
-            ring_intensity = get_ring_intensity(image, maxima, r, cropped_center)
+            ring_intensity = get_ring_intensity(image, maxima, pixel_distances, cropped_center)
             if ring_intensity < ring_threshold:
                 # clear hexagonal crystal
                 return 6
@@ -156,7 +197,7 @@ def classify_image_region(image, maxima, ring_threshold, r, cropped_center):
                 # potential boundary between hex+liquid
                 return 1
         elif number_of_maxima == 4:
-            ring_intensity = get_ring_intensity(image, maxima, r, cropped_center)
+            ring_intensity = get_ring_intensity(image, maxima, pixel_distances, cropped_center)
             if ring_intensity < ring_threshold:
                 # clear cross crystal
                 return 4
@@ -169,9 +210,11 @@ def classify_image_region(image, maxima, ring_threshold, r, cropped_center):
 
 
 def plot_result(array):
-    ###plotting###
-    cmap = matplotlib.colors.ListedColormap(
-        ['darkblue', 'skyblue', 'cadetblue', 'limegreen', 'orangered'])
+    """
+    Convert the result to a 2D image representation
+    :param array: The result of the analysis
+    """
+    cmap = matplotlib.colors.ListedColormap(['darkblue', 'skyblue', 'cadetblue', 'limegreen', 'orangered'])
     # plot, 6 = hexagonal crystal, 4 = cross crystal 1.0 = hex+liquid ring, 0.5 = cross + liquid ring, 0.0 = liquid (neither 4 nor 6 peaks detected)
     bounds = [-0.4, 0.4, 0.6, 1.4, 5.9, 6.1]
     norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
@@ -181,7 +224,14 @@ def plot_result(array):
 
 
 def load_image(filename):
-    image = pl.imread(filename)[:, :, 0]
+    """
+    Open an image as an array
+    :param filename: The path of the image to open
+    :return: An ndarray of the image
+    """
+    image = plt.imread(filename)
+    if len(image.shape) == 3:
+        image = image[:, :, 0]
     return image
 
 
@@ -191,11 +241,11 @@ def main():
     rastering_interval = 1
     ring_threshold = 0.9
     size_of_scan_box = 128
-    threshold = 0.5
+    minimum_peak_intensity_threshold = 0.5
     image_crop_factor = 0.3
 
     image = load_image(filename)
-    array = scanfourier(image, threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor)
+    array = scanfourier(image, minimum_peak_intensity_threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor)
 
     plot_result(array)
 
