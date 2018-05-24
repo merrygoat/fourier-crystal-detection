@@ -62,9 +62,14 @@ def remove_central_peak(image, maxima):
     :param maxima: ndarray of coordinates corresponding to peaks in the image
     :return: ndarray corresponding to coordinates of peaks in the image
     """
-    central_coordinate = get_center_of_image(image.shape)
-    revised_maxima = [peak for peak in list(maxima) if np.all(peak != central_coordinate)]
-    return np.array(revised_maxima)
+    num_maxima = len(maxima)
+    # We only care if there might be 4 or 6 crystal maxima
+    if 3 < num_maxima < 8:
+        central_coordinate = get_center_of_image(image.shape)
+        revised_maxima = [peak for peak in list(maxima) if np.all(peak != central_coordinate)]
+        return np.array(revised_maxima)
+    else:
+        return maxima
 
 
 def get_ring_intensity(image, maxima, pixel_distances, center_coordinate):
@@ -143,7 +148,9 @@ def setup_fourier_scan(image_crop_factor, size_of_scan_box):
     :return: pixel_distances - An array giving the distance of each pixel from the center of the image
     """
     minimum_peak_separation_distance = int(size_of_scan_box / 20.)
-    cropped_image_size = int(size_of_scan_box * (1 - 2 * image_crop_factor))
+    x_min = int(size_of_scan_box * image_crop_factor)
+    x_max = int(size_of_scan_box * (1 - image_crop_factor))
+    cropped_image_size = x_max - x_min
     cropped_center = get_center_of_image([cropped_image_size, cropped_image_size])
 
     binsize = 1
@@ -238,11 +245,11 @@ def load_image(filename):
 def main():
 
     filename = 'sample_image.tif'
-    rastering_interval = 1
+    rastering_interval = 2
     ring_threshold = 0.9
     size_of_scan_box = 128
     minimum_peak_intensity_threshold = 0.5
-    image_crop_factor = 0.3
+    image_crop_factor = 0.35
 
     image = load_image(filename)
     array = scanfourier(image, minimum_peak_intensity_threshold, size_of_scan_box, ring_threshold, rastering_interval, image_crop_factor)
